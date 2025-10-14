@@ -1,24 +1,24 @@
-import PromptSync from "prompt-sync";
-import books from "./books.js";
-const prompt = PromptSync();
+import PromptSync from "prompt-sync"; //import the prompt command
+import books from "./books.js"; // import deslauriers array of books
+const prompt = PromptSync(); //the word prompt is command to prompt users
 
-const library = books;
+const library = books; 
 
 function addBook(library, title, author, year) {
   const book = {
-    title: String(title),
+    title: String(title), // keys
     author: String(author),
     year: Number(year),
     isAvailable: true
   };
-  library.push(book);
+  library.push(book); // adds to library
   return book;
 }
 
 function listAvailableBooks(library) {
   for (let i = 0; i < library.length; i++) {
     const book = library[i];
-    if (book.isAvailable === true) {
+    if (book.isAvailable === true) { // checks for type and value
       console.log(book.title);
     }
   }
@@ -30,7 +30,7 @@ function borrowBook(library, title) {
     if (book.title === title) {
       if (book.isAvailable) {
         book.isAvailable = false;
-        console.log(`Borrowed: ${book.title}`);
+        console.log(`Borrowed: ${book.title}`); //like f string in python (template literal)
         return true;
       } else {
         console.log("That book is already borrowed.");
@@ -88,16 +88,21 @@ function listBooksBeforeYear(library, year) {
   }
 }
 
-function removeBook(title){
+function removeBook(library, title){
     const t = String(title);
+    let found = false;
     for(let i = 0; i < library.length;i++) {
         const book = library[i];
         if(book.title === t){
-            books.splice(i)
+            books.splice(i,1) // that index
             console.log("Book found");
+            found = true;
+            break;
         }
     }
-    console.log("book not found");
+    if(!found){
+      console.log("book not found");
+    }
 }
 
 
@@ -118,46 +123,46 @@ Library Menu
 `);
 }
 
-while (true) {
+while (true) { //running sequence
   showMenu();
   const choice = Number(prompt("Choose an option: "));
 
-  if (choice === "0") {
-    console.log("Goodbye!");
-    break;
-  }
+    if (choice === 0) {
+      console.log("Goodbye!");
+      break;
+    }
 
-    if (choice===1){
+    else if (choice === 1){
       const title = prompt("Title: ");
       const author = prompt("Author: ");
       const year = prompt("Year: ");
       addBook(library, title, author, year);
     }
-    if (choice === 2){
+    else if (choice === 2){
       listAvailableBooks(library);
 
     }
-    if (choice === 3){
+    else if (choice === 3){
       const title = prompt("Title to borrow: ");
       borrowBook(library, title);
 
     }
-    if (choice === 4){
+    else if (choice === 4){
       const title = prompt("Title to return: ");
       returnBook(library, title);
 
     }
-    if (choice === 5){
+    else if (choice === 5){
       const author = prompt("Author name: ");
       listBooksByAuthor(library, author);
 
     }
-    if (choice === 6){
+    else if (choice === 6){
       const year = prompt("Enter year: ");
       listBooksBeforeYear(library, year);
 
     }
-    if (choice === 7){
+    else if (choice === 7){
       const title = prompt("Title to remove: ");
       removeBook(library, title);
 
