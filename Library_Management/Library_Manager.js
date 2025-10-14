@@ -94,7 +94,7 @@ function removeBook(library, title){
     for(let i = 0; i < library.length;i++) {
         const book = library[i];
         if(book.title === t){
-            books.splice(i,1) // that index
+            books.splice(i,1) // removes that index
             console.log("Book found");
             found = true;
             break;
