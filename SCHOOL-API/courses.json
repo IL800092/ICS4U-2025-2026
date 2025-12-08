@@ -1,0 +1,56 @@
+[
+  {
+    "id": 1,
+    "code": "ICS4U",
+    "name": "Grade 12 Computer Science",
+    "teacherId": 1,
+    "semester": "1",
+    "room": "Lab 201",
+    "schedule": "Day 1 AM"
+  },
+  {
+    "id": 2,
+    "code": "SBI3U",
+    "name": "Grade 11 Biology",
+    "teacherId": 2,
+    "semester": "1",
+    "room": "305",
+    "schedule": "Day 1 PM"
+  },
+  {
+    "id": 3,
+    "code": "SCH4U",
+    "name": "Chemistry",
+    "teacherId": 3,
+    "semester": "2",
+    "room": "Lab 102",
+    "schedule": "Day 2 AM"
+  },
+  {
+    "id": 4,
+    "code": "ENG4U",
+    "name": "English",
+    "teacherId": 4,
+    "semester": "2",
+    "room": "214",
+    "schedule": "Day 2 PM"
+  },
+  {
+    "id": 5,
+    "code": "CHY4U",
+    "name": "World History",
+    "teacherId": 5,
+    "semester": "Full Year",
+    "room": "118",
+    "schedule": "Day 1 AM"
+  },
+  {
+    "id": 6,
+    "code": "PPL3O",
+    "name": "Healthy Active Living Education",
+    "teacherId": 6,
+    "semester": "Full Year",
+    "room": "Gym",
+    "schedule": "Day 1 PM"
+  }
+]
