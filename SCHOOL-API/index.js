@@ -404,3 +404,88 @@ app.delete("/tests/:id", (req, res) => {
   saveJson(TESTS_FILE, tests);
   res.json(deleted);
 });
+
+
+app.get("/students/:id/tests", (req,res) => {
+  const id = Number(req.params.id);
+
+  const student = students.find(s => s.id === studentId);
+  if (!student) {
+    return res.status(404).json({ error: "Student not found" });
+  }
+
+  const studentTest = tests.filter(te => te.studentId === id);
+  res.json(studentTest)
+})
+
+app.get("/courses/:id/tests", (req,res) => {
+  const id = Number(req.params.id);
+
+  const course = courses.find(c => c.id === courseId);
+  if (!course) {
+    return res.status(404).json({ error: "Course not found" });
+  }
+  const courseTest = tests.filter(te => te.courseId === id)
+  res.json(courseTest)
+})
+
+app.get("/students/:id/average", (req, res) => {
+  const id = Number(req.params.id);
+
+  // Make sure the student exists
+  const student = students.find(s => s.id === id);
+  if (!student) {
+    return res.status(404).json({ error: "Student not found" });
+  }
+
+  // All tests for that student
+  const studentTests = tests.filter(te => te.studentId === id);
+
+  if (studentTests.length === 0) {
+    return res.status(404).json({ error: "No tests found for this student" });
+  }
+
+  // Calculate average percentage across all tests
+  const totalPercent = studentTests.reduce((sum, te) => {
+    return sum + (te.mark / te.outOf) * 100;
+  }, 0);
+
+  const average = totalPercent / studentTests.length;
+
+  res.json({
+    studentId: id,
+    average: Number(average.toFixed(2)),
+    testCount: studentTests.length
+  });
+});
+
+
+app.get("/courses/:id/average", (req, res) => {
+  const id = Number(req.params.id);
+
+  // Make sure the course exists
+  const course = courses.find(c => c.id === id);
+  if (!course) {
+    return res.status(404).json({ error: "Course not found" });
+  }
+
+  // All tests for that course
+  const courseTests = tests.filter(te => te.courseId === id);
+
+  if (courseTests.length === 0) {
+    return res.status(404).json({ error: "No tests found for this course" });
+  }
+
+  const totalPercent = courseTests.reduce((sum, te) => {
+    return sum + (te.mark / te.outOf) * 100;
+  }, 0);
+
+  const average = totalPercent / courseTests.length;
+
+  res.json({
+    courseId: id,
+    average: Number(average.toFixed(2)),
+    testCount: courseTests.length
+  });
+});
+
