@@ -1,7 +1,7 @@
-import express from "express";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import express from "express"; //express fram work to create api server handles routes, middle ware and sending responses
+import fs from "fs"; //node built in file system module used to read write and check
+import path from "path";// load nodes path utilities
+import { fileURLToPath } from "url"; // es urls to actual file paths
 
 // Fix __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
