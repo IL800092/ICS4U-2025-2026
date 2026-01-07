@@ -12,6 +12,8 @@ const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
 
 if (!MONGODB_URI) {
+  console.log("Render sees MONGODB_URI?", Boolean(process.env.MONGODB_URI));
+  console.log("Keys include MONGODB_URI?", Object.keys(process.env).includes("MONGODB_URI"));
   throw new Error("Missing MONGODB_URI in environment variables");
 }
 
