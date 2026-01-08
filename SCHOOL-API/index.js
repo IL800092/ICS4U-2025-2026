@@ -21,7 +21,7 @@ const asyncHandler =
   (req, res, next) =>
     Promise.resolve(fn(req, res, next)).catch(next);
 
-// Optional root route so "/" doesn't show Cannot GET /
+/* -------------------- root -------------------- */
 app.get("/", (req, res) => {
   res.status(200).send("School API running. Try /students, /teachers, /courses, /tests");
 });
@@ -68,7 +68,7 @@ app.post(
       room: room || ""
     };
 
-    // Optional: keep old numeric id if provided
+    // Optional legacy numeric id
     if (id !== undefined) newTeacher.id = Number(id);
 
     const result = await db.collection("teachers").insertOne(newTeacher);
@@ -122,6 +122,7 @@ app.delete(
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ error: "Invalid teacher _id" });
 
+    // Block delete if referenced by any course
     const usedInCourse = await db.collection("courses").findOne({ teacher_id: _id });
     if (usedInCourse) {
       return res.status(409).json({
@@ -132,7 +133,8 @@ app.delete(
     const result = await db.collection("teachers").findOneAndDelete({ _id });
     if (!result.value) return res.status(404).json({ error: "Teacher not found" });
 
-    res.status(200).json(result.value);
+    // 204 means no body
+    return res.sendStatus(204);
   })
 );
 
@@ -166,7 +168,7 @@ app.post(
     const db = getDB();
     const { code, name, teacher_id, semester, room, schedule, id, teacherId } = req.body;
 
-    if (!code || !name || !semester || !room || !teacher_id) {
+    if (!code || !name || !teacher_id || !semester || !room) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
@@ -185,7 +187,7 @@ app.post(
       schedule: schedule || ""
     };
 
-    // Optional legacy fields
+    // Optional legacy numeric ids
     if (id !== undefined) newCourse.id = Number(id);
     if (teacherId !== undefined) newCourse.teacherId = Number(teacherId);
 
@@ -220,7 +222,7 @@ app.put(
 
     if (teacher_id !== undefined) {
       const tId = toObjectId(teacher_id);
-      if (!tId) return res.status(400).json({ error: "Invalid teacher_id" });
+      if (!tId) return res.status(400).json({ error: "teacher_id must be a valid teacher _id" });
 
       const teacherExists = await db.collection("teachers").findOne({ _id: tId });
       if (!teacherExists) return res.status(400).json({ error: "teacher_id must be a valid teacher _id" });
@@ -262,7 +264,7 @@ app.delete(
     const result = await db.collection("courses").findOneAndDelete({ _id });
     if (!result.value) return res.status(404).json({ error: "Course not found" });
 
-    res.status(200).json(result.value);
+    return res.sendStatus(204);
   })
 );
 
@@ -308,7 +310,6 @@ app.post(
       homeroom: homeroom || ""
     };
 
-    // Optional legacy id
     if (id !== undefined) newStudent.id = Number(id);
 
     const result = await db.collection("students").insertOne(newStudent);
@@ -372,7 +373,7 @@ app.delete(
     const result = await db.collection("students").findOneAndDelete({ _id });
     if (!result.value) return res.status(404).json({ error: "Student not found" });
 
-    res.status(200).json(result.value);
+    return res.sendStatus(204);
   })
 );
 
@@ -431,7 +432,6 @@ app.post(
       weight: weight !== undefined ? Number(weight) : null
     };
 
-    // Optional legacy id
     if (id !== undefined) newTest.id = Number(id);
 
     const result = await db.collection("tests").insertOne(newTest);
@@ -507,7 +507,7 @@ app.delete(
     const result = await db.collection("tests").findOneAndDelete({ _id });
     if (!result.value) return res.status(404).json({ error: "Test not found" });
 
-    res.status(200).json(result.value);
+    return res.sendStatus(204);
   })
 );
 
@@ -596,7 +596,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-/* -------------------- start server -------------------- */
+/* -------------------- start after DB connects -------------------- */
 async function start() {
   await connectToDB();
   app.listen(PORT, () => {
