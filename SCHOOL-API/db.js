@@ -40,3 +40,4 @@ export function getDB() {
 export async function closeDB() {
   if (client) await client.close();
 }
+

@@ -1,5 +1,6 @@
 import express from "express";
 import dotenv from "dotenv";
+import { ObjectId } from "mongodb";
 import { connectToDB, getDB } from "./db.js";
 
 dotenv.config();
@@ -9,24 +10,15 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Helpers
-async function getNextId(collectionName) {
-  const db = getDB();
-  const doc = await db
-    .collection(collectionName)
-    .find({})
-    .sort({ id: -1 })
-    .limit(1)
-    .toArray();
-
-  if (doc.length === 0) return 1;
-  return Number(doc[0].id) + 1;
-}
-
-// Optional root route so "/" doesn't show Cannot GET /
 app.get("/", (req, res) => {
   res.send("School API running. Try /students, /teachers, /courses, /tests");
 });
+
+/* ---------- helpers ---------- */
+function toObjectId(idStr) {
+  if (!ObjectId.isValid(idStr)) return null;
+  return new ObjectId(idStr);
+}
 
 /* -------------------- TEACHERS -------------------- */
 app.get("/teachers", async (req, res) => {
@@ -37,9 +29,10 @@ app.get("/teachers", async (req, res) => {
 
 app.get("/teachers/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid teacher _id" });
 
-  const teacher = await db.collection("teachers").findOne({ id });
+  const teacher = await db.collection("teachers").findOne({ _id });
   if (!teacher) return res.status(404).json({ error: "Teacher not found" });
 
   res.json(teacher);
@@ -47,14 +40,13 @@ app.get("/teachers/:id", async (req, res) => {
 
 app.post("/teachers", async (req, res) => {
   const db = getDB();
-  const { firstName, lastName, email, department, room } = req.body;
+  const { firstName, lastName, email, department, room, id } = req.body;
 
   if (!firstName || !lastName || !email || !department) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   const newTeacher = {
-    id: await getNextId("teachers"),
     firstName,
     lastName,
     email,
@@ -62,15 +54,20 @@ app.post("/teachers", async (req, res) => {
     room: room || ""
   };
 
-  await db.collection("teachers").insertOne(newTeacher);
-  res.status(201).json(newTeacher);
+  // Keep your old numeric id if you want
+  if (id !== undefined) newTeacher.id = Number(id);
+
+  const result = await db.collection("teachers").insertOne(newTeacher);
+  const created = await db.collection("teachers").findOne({ _id: result.insertedId });
+
+  res.status(201).json(created);
 });
 
 app.put("/teachers/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid teacher _id" });
 
-  const updates = {};
   const { firstName, lastName, email, department, room } = req.body;
 
   if (
@@ -83,34 +80,36 @@ app.put("/teachers/:id", async (req, res) => {
     return res.status(400).json({ error: "No fields provided to update" });
   }
 
+  const updates = {};
   if (firstName !== undefined) updates.firstName = firstName;
   if (lastName !== undefined) updates.lastName = lastName;
   if (email !== undefined) updates.email = email;
   if (department !== undefined) updates.department = department;
   if (room !== undefined) updates.room = room;
 
-  const result = await db.collection("teachers").findOneAndUpdate(
-    { id },
+  const updated = await db.collection("teachers").findOneAndUpdate(
+    { _id },
     { $set: updates },
     { returnDocument: "after" }
   );
 
-  if (!result) return res.status(404).json({ error: "Teacher not found" });
-  res.json(result);
+  if (!updated) return res.status(404).json({ error: "Teacher not found" });
+  res.json(updated);
 });
 
 app.delete("/teachers/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid teacher _id" });
 
-  const usedInCourse = await db.collection("courses").findOne({ teacherId: id });
+  const usedInCourse = await db.collection("courses").findOne({ teacher_id: _id });
   if (usedInCourse) {
     return res.status(400).json({
-      error: "Cannot delete teacher that is used in course. Delete or update those courses first."
+      error: "Cannot delete teacher used by a course. Update or delete those courses first."
     });
   }
 
-  const deleted = await db.collection("teachers").findOneAndDelete({ id });
+  const deleted = await db.collection("teachers").findOneAndDelete({ _id });
   if (!deleted) return res.status(404).json({ error: "Teacher not found" });
 
   res.json(deleted);
@@ -125,9 +124,10 @@ app.get("/courses", async (req, res) => {
 
 app.get("/courses/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid course _id" });
 
-  const course = await db.collection("courses").findOne({ id });
+  const course = await db.collection("courses").findOne({ _id });
   if (!course) return res.status(404).json({ error: "Course not found" });
 
   res.json(course);
@@ -135,41 +135,57 @@ app.get("/courses/:id", async (req, res) => {
 
 app.post("/courses", async (req, res) => {
   const db = getDB();
-  const { code, name, teacherId, semester, room, schedule } = req.body;
+  const { code, name, teacher_id, teacherId, semester, room, schedule, id } = req.body;
 
-  if (!code || !name || !teacherId || !semester || !room) {
+  if (!code || !name || !semester || !room) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-  const teacherExists = await db.collection("teachers").findOne({ id: Number(teacherId) });
-  if (!teacherExists) {
-    return res.status(400).json({ error: "teacherId must be a valid teacher id" });
+  // Accept teacher_id as ObjectId string
+  let tId = null;
+  if (teacher_id) tId = toObjectId(teacher_id);
+
+  if (!tId && teacherId !== undefined) {
+    // optional fallback if you still send old numeric teacherId
+    const t = await db.collection("teachers").findOne({ id: Number(teacherId) });
+    if (t) tId = t._id;
   }
 
+  if (!tId) return res.status(400).json({ error: "teacher_id must be a valid teacher _id" });
+
+  const teacherExists = await db.collection("teachers").findOne({ _id: tId });
+  if (!teacherExists) return res.status(400).json({ error: "teacher_id must be a valid teacher _id" });
+
   const newCourse = {
-    id: await getNextId("courses"),
     code,
     name,
-    teacherId: Number(teacherId),
+    teacher_id: tId,
     semester,
     room,
     schedule: schedule || ""
   };
 
-  await db.collection("courses").insertOne(newCourse);
-  res.status(201).json(newCourse);
+  // Keep old numeric ids if your teacher wants you to preserve them
+  if (id !== undefined) newCourse.id = Number(id);
+  if (teacherId !== undefined) newCourse.teacherId = Number(teacherId);
+
+  const result = await db.collection("courses").insertOne(newCourse);
+  const created = await db.collection("courses").findOne({ _id: result.insertedId });
+
+  res.status(201).json(created);
 });
 
 app.put("/courses/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid course _id" });
 
-  const { code, name, teacherId, semester, room, schedule } = req.body;
+  const { code, name, teacher_id, semester, room, schedule } = req.body;
 
   if (
     code === undefined &&
     name === undefined &&
-    teacherId === undefined &&
+    teacher_id === undefined &&
     semester === undefined &&
     room === undefined &&
     schedule === undefined
@@ -178,12 +194,14 @@ app.put("/courses/:id", async (req, res) => {
   }
 
   const updates = {};
-  if (teacherId !== undefined) {
-    const teacherExists = await db.collection("teachers").findOne({ id: Number(teacherId) });
-    if (!teacherExists) {
-      return res.status(400).json({ error: "teacherId must be a valid teacher id" });
-    }
-    updates.teacherId = Number(teacherId);
+  if (teacher_id !== undefined) {
+    const tId = toObjectId(teacher_id);
+    if (!tId) return res.status(400).json({ error: "Invalid teacher_id" });
+
+    const teacherExists = await db.collection("teachers").findOne({ _id: tId });
+    if (!teacherExists) return res.status(400).json({ error: "teacher_id must be a valid teacher _id" });
+
+    updates.teacher_id = tId;
   }
 
   if (code !== undefined) updates.code = code;
@@ -193,7 +211,7 @@ app.put("/courses/:id", async (req, res) => {
   if (schedule !== undefined) updates.schedule = schedule;
 
   const updated = await db.collection("courses").findOneAndUpdate(
-    { id },
+    { _id },
     { $set: updates },
     { returnDocument: "after" }
   );
@@ -204,16 +222,17 @@ app.put("/courses/:id", async (req, res) => {
 
 app.delete("/courses/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid course _id" });
 
-  const containsTest = await db.collection("tests").findOne({ courseId: id });
+  const containsTest = await db.collection("tests").findOne({ course_id: _id });
   if (containsTest) {
     return res.status(400).json({
-      error: "Cannot delete course that contains test. Delete or update those tests first."
+      error: "Cannot delete course that has tests. Delete or update those tests first."
     });
   }
 
-  const deleted = await db.collection("courses").findOneAndDelete({ id });
+  const deleted = await db.collection("courses").findOneAndDelete({ _id });
   if (!deleted) return res.status(404).json({ error: "Course not found" });
 
   res.json(deleted);
@@ -228,9 +247,10 @@ app.get("/students", async (req, res) => {
 
 app.get("/students/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid student _id" });
 
-  const student = await db.collection("students").findOne({ id });
+  const student = await db.collection("students").findOne({ _id });
   if (!student) return res.status(404).json({ error: "Student not found" });
 
   res.json(student);
@@ -238,14 +258,13 @@ app.get("/students/:id", async (req, res) => {
 
 app.post("/students", async (req, res) => {
   const db = getDB();
-  const { firstName, lastName, grade, studentNumber, homeroom } = req.body;
+  const { firstName, lastName, grade, studentNumber, homeroom, id } = req.body;
 
-  if (!firstName || !lastName || !grade || !studentNumber) {
+  if (!firstName || !lastName || grade === undefined || !studentNumber) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   const newStudent = {
-    id: await getNextId("students"),
     firstName,
     lastName,
     grade: Number(grade),
@@ -253,13 +272,18 @@ app.post("/students", async (req, res) => {
     homeroom: homeroom || ""
   };
 
-  await db.collection("students").insertOne(newStudent);
-  res.status(201).json(newStudent);
+  if (id !== undefined) newStudent.id = Number(id);
+
+  const result = await db.collection("students").insertOne(newStudent);
+  const created = await db.collection("students").findOne({ _id: result.insertedId });
+
+  res.status(201).json(created);
 });
 
 app.put("/students/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid student _id" });
 
   const { firstName, lastName, grade, studentNumber, homeroom } = req.body;
 
@@ -281,7 +305,7 @@ app.put("/students/:id", async (req, res) => {
   if (homeroom !== undefined) updates.homeroom = homeroom;
 
   const updated = await db.collection("students").findOneAndUpdate(
-    { id },
+    { _id },
     { $set: updates },
     { returnDocument: "after" }
   );
@@ -292,16 +316,17 @@ app.put("/students/:id", async (req, res) => {
 
 app.delete("/students/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid student _id" });
 
-  const containsTest = await db.collection("tests").findOne({ studentId: id });
+  const containsTest = await db.collection("tests").findOne({ student_id: _id });
   if (containsTest) {
     return res.status(400).json({
-      error: "Cannot delete student has test. Delete or update those tests first."
+      error: "Cannot delete student that has tests. Delete or update those tests first."
     });
   }
 
-  const deleted = await db.collection("students").findOneAndDelete({ id });
+  const deleted = await db.collection("students").findOneAndDelete({ _id });
   if (!deleted) return res.status(404).json({ error: "Student not found" });
 
   res.json(deleted);
@@ -316,9 +341,10 @@ app.get("/tests", async (req, res) => {
 
 app.get("/tests/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid test _id" });
 
-  const test = await db.collection("tests").findOne({ id });
+  const test = await db.collection("tests").findOne({ _id });
   if (!test) return res.status(404).json({ error: "Test not found" });
 
   res.json(test);
@@ -326,22 +352,26 @@ app.get("/tests/:id", async (req, res) => {
 
 app.post("/tests", async (req, res) => {
   const db = getDB();
-  const { studentId, courseId, testName, date, mark, outOf, weight } = req.body;
+  const { student_id, course_id, testName, date, mark, outOf, weight, id } = req.body;
 
-  if (!studentId || !courseId || !testName || !date || mark === undefined || outOf === undefined) {
+  if (!student_id || !course_id || !testName || !date || mark === undefined || outOf === undefined) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-  const studentExists = await db.collection("students").findOne({ id: Number(studentId) });
-  if (!studentExists) return res.status(400).json({ error: "studentId must be a valid student id" });
+  const sId = toObjectId(student_id);
+  const cId = toObjectId(course_id);
+  if (!sId) return res.status(400).json({ error: "Invalid student_id" });
+  if (!cId) return res.status(400).json({ error: "Invalid course_id" });
 
-  const courseExists = await db.collection("courses").findOne({ id: Number(courseId) });
-  if (!courseExists) return res.status(400).json({ error: "courseId must be a valid course id" });
+  const studentExists = await db.collection("students").findOne({ _id: sId });
+  if (!studentExists) return res.status(400).json({ error: "student_id must be a valid student _id" });
+
+  const courseExists = await db.collection("courses").findOne({ _id: cId });
+  if (!courseExists) return res.status(400).json({ error: "course_id must be a valid course _id" });
 
   const newTest = {
-    id: await getNextId("tests"),
-    studentId: Number(studentId),
-    courseId: Number(courseId),
+    student_id: sId,
+    course_id: cId,
     testName,
     date,
     mark: Number(mark),
@@ -349,19 +379,24 @@ app.post("/tests", async (req, res) => {
     weight: weight !== undefined ? Number(weight) : null
   };
 
-  await db.collection("tests").insertOne(newTest);
-  res.status(201).json(newTest);
+  if (id !== undefined) newTest.id = Number(id);
+
+  const result = await db.collection("tests").insertOne(newTest);
+  const created = await db.collection("tests").findOne({ _id: result.insertedId });
+
+  res.status(201).json(created);
 });
 
 app.put("/tests/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid test _id" });
 
-  const { studentId, courseId, testName, date, mark, outOf, weight } = req.body;
+  const { student_id, course_id, testName, date, mark, outOf, weight } = req.body;
 
   if (
-    studentId === undefined &&
-    courseId === undefined &&
+    student_id === undefined &&
+    course_id === undefined &&
     testName === undefined &&
     date === undefined &&
     mark === undefined &&
@@ -373,16 +408,20 @@ app.put("/tests/:id", async (req, res) => {
 
   const updates = {};
 
-  if (studentId !== undefined) {
-    const studentExists = await db.collection("students").findOne({ id: Number(studentId) });
-    if (!studentExists) return res.status(400).json({ error: "studentId must be a valid student id" });
-    updates.studentId = Number(studentId);
+  if (student_id !== undefined) {
+    const sId = toObjectId(student_id);
+    if (!sId) return res.status(400).json({ error: "Invalid student_id" });
+    const studentExists = await db.collection("students").findOne({ _id: sId });
+    if (!studentExists) return res.status(400).json({ error: "student_id must be a valid student _id" });
+    updates.student_id = sId;
   }
 
-  if (courseId !== undefined) {
-    const courseExists = await db.collection("courses").findOne({ id: Number(courseId) });
-    if (!courseExists) return res.status(400).json({ error: "courseId must be a valid course id" });
-    updates.courseId = Number(courseId);
+  if (course_id !== undefined) {
+    const cId = toObjectId(course_id);
+    if (!cId) return res.status(400).json({ error: "Invalid course_id" });
+    const courseExists = await db.collection("courses").findOne({ _id: cId });
+    if (!courseExists) return res.status(400).json({ error: "course_id must be a valid course _id" });
+    updates.course_id = cId;
   }
 
   if (testName !== undefined) updates.testName = testName;
@@ -392,7 +431,7 @@ app.put("/tests/:id", async (req, res) => {
   if (weight !== undefined) updates.weight = weight === null ? null : Number(weight);
 
   const updated = await db.collection("tests").findOneAndUpdate(
-    { id },
+    { _id },
     { $set: updates },
     { returnDocument: "after" }
   );
@@ -403,9 +442,10 @@ app.put("/tests/:id", async (req, res) => {
 
 app.delete("/tests/:id", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const _id = toObjectId(req.params.id);
+  if (!_id) return res.status(400).json({ error: "Invalid test _id" });
 
-  const deleted = await db.collection("tests").findOneAndDelete({ id });
+  const deleted = await db.collection("tests").findOneAndDelete({ _id });
   if (!deleted) return res.status(404).json({ error: "Test not found" });
 
   res.json(deleted);
@@ -414,79 +454,60 @@ app.delete("/tests/:id", async (req, res) => {
 /* -------------------- EXTRA ENDPOINTS -------------------- */
 app.get("/students/:id/tests", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const student_id = toObjectId(req.params.id);
+  if (!student_id) return res.status(400).json({ error: "Invalid student _id" });
 
-  const student = await db.collection("students").findOne({ id });
+  const student = await db.collection("students").findOne({ _id: student_id });
   if (!student) return res.status(404).json({ error: "Student not found" });
 
-  const studentTests = await db.collection("tests").find({ studentId: id }).toArray();
+  const studentTests = await db.collection("tests").find({ student_id }).toArray();
   res.json(studentTests);
 });
 
 app.get("/courses/:id/tests", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const course_id = toObjectId(req.params.id);
+  if (!course_id) return res.status(400).json({ error: "Invalid course _id" });
 
-  const course = await db.collection("courses").findOne({ id });
+  const course = await db.collection("courses").findOne({ _id: course_id });
   if (!course) return res.status(404).json({ error: "Course not found" });
 
-  const courseTests = await db.collection("tests").find({ courseId: id }).toArray();
+  const courseTests = await db.collection("tests").find({ course_id }).toArray();
   res.json(courseTests);
 });
 
 app.get("/students/:id/average", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const student_id = toObjectId(req.params.id);
+  if (!student_id) return res.status(400).json({ error: "Invalid student _id" });
 
-  const student = await db.collection("students").findOne({ id });
+  const student = await db.collection("students").findOne({ _id: student_id });
   if (!student) return res.status(404).json({ error: "Student not found" });
 
-  const studentTests = await db.collection("tests").find({ studentId: id }).toArray();
+  const studentTests = await db.collection("tests").find({ student_id }).toArray();
   if (studentTests.length === 0) return res.status(404).json({ error: "No tests found for this student" });
 
   const totalPercent = studentTests.reduce((sum, te) => sum + (te.mark / te.outOf) * 100, 0);
   const average = totalPercent / studentTests.length;
 
-  res.json({ studentId: id, average: Number(average.toFixed(2)), testCount: studentTests.length });
+  res.json({ student_id, average: Number(average.toFixed(2)), testCount: studentTests.length });
 });
 
 app.get("/courses/:id/average", async (req, res) => {
   const db = getDB();
-  const id = Number(req.params.id);
+  const course_id = toObjectId(req.params.id);
+  if (!course_id) return res.status(400).json({ error: "Invalid course _id" });
 
-  const course = await db.collection("courses").findOne({ id });
+  const course = await db.collection("courses").findOne({ _id: course_id });
   if (!course) return res.status(404).json({ error: "Course not found" });
 
-  const courseTests = await db.collection("tests").find({ courseId: id }).toArray();
+  const courseTests = await db.collection("tests").find({ course_id }).toArray();
   if (courseTests.length === 0) return res.status(404).json({ error: "No tests found for this course" });
 
   const totalPercent = courseTests.reduce((sum, te) => sum + (te.mark / te.outOf) * 100, 0);
   const average = totalPercent / courseTests.length;
 
-  res.json({ courseId: id, average: Number(average.toFixed(2)), testCount: courseTests.length });
-});
-
-app.get("/teachers/:id/summary", async (req, res) => {
-  const db = getDB();
-  const id = Number(req.params.id);
-
-  const teacher = await db.collection("teachers").findOne({ id });
-  if (!teacher) return res.status(404).json({ error: "Teacher not found" });
-
-  const rightCourses = await db.collection("courses").find({ teacherId: id }).toArray();
-
-  const courseSummaries = await Promise.all(
-    rightCourses.map(async (c) => {
-      const testCount = await db.collection("tests").countDocuments({ courseId: c.id });
-      return { courseId: c.id, courseName: c.name, testCount };
-    })
-  );
-
-  res.status(200).json({
-    teacherId: id,
-    teacherName: `${teacher.firstName} ${teacher.lastName}`,
-    courses: courseSummaries
-  });
+  res.json({ course_id, average: Number(average.toFixed(2)), testCount: courseTests.length });
 });
 
 // Start after DB connects
